@@ -1,4 +1,7 @@
-FROM arm64v8/ubuntu:22.04
+FROM ubuntu:22.04
+
+ARG TARGETARCH
+ARG AGORA_SDK_VERSION=4.4.32
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -14,8 +17,18 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy SDK and example sources into the image
 COPY agora_rtc_sdk /app/agora_rtc_sdk
+
+# Download Agora SDK if not already present (CI path; local dev copies .so files directly)
+RUN if [ ! -f /app/agora_rtc_sdk/agora_sdk/libagora_rtc_sdk.so ]; then \
+        echo "Downloading Agora SDK ${AGORA_SDK_VERSION} for ${TARGETARCH}..." && \
+        curl -fsSL \
+            "https://github.com/Bac1314/Agora-server-gateway-openai-translate/releases/download/sdk-${AGORA_SDK_VERSION}/Agora_Native_SDK_${TARGETARCH}.tgz" \
+            | tar xz -C /app/agora_rtc_sdk/agora_sdk/ \
+            && echo "Agora SDK download complete"; \
+    else \
+        echo "Agora SDK already present (local-dev path)"; \
+    fi
 
 # Download nlohmann/json (used by translator_bot for OpenAI JSON parsing)
 RUN mkdir -p /app/agora_rtc_sdk/example/third-party/json_parser/include && \
@@ -27,9 +40,12 @@ RUN mkdir -p /app/agora_rtc_sdk/example/third-party/json_parser/include && \
 WORKDIR /app/agora_rtc_sdk/example
 RUN ./build.sh
 
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
+
 # Agora SDK .so files are in agora_sdk/ relative to the example output
 ENV LD_LIBRARY_PATH=/app/agora_rtc_sdk/agora_sdk
 
 WORKDIR /app/agora_rtc_sdk/example/out
 
-ENTRYPOINT ["/app/agora_rtc_sdk/example/out/translator_bot"]
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
