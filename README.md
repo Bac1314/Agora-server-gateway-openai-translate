@@ -1,6 +1,6 @@
-# Agora MiddleMan — OpenAI Realtime Translation PoC
+# Agora Server Gateway — OpenAI Realtime Translation PoC
 
-A server-side translator bot that joins an Agora RTC channel, subscribes to a speaker's PCM audio, bridges it through OpenAI's `gpt-realtime-translate` via WebSocket, and republishes translated PCM under a bot UID. Listeners subscribe to that UID to hear real-time translated audio.
+A server-side translator bot that joins an Agora RTC channel, subscribes to a speaker's PCM audio, bridges it through OpenAI's `gpt-realtime-translate` via WebSocket, and republishes translated PCM under a bot UID. Listeners subscribe to that UID to hear real-time translated audio. Live captions (source + translated) are delivered simultaneously via Agora data stream.
 
 **Key advantage:** One OpenAI session serves all listeners regardless of count — translation cost stays flat while fanout scales to thousands of listeners via Agora SD-RTN.
 
@@ -9,8 +9,11 @@ Speaker (Web/iOS/Android)
   └─▶ Agora RTC Channel
         └─▶ translator-bot (Linux process)
               ├─▶ OpenAI gpt-realtime-translate (WebSocket)
-              └─▶ publishes translated audio as bot UID
-                    └─▶ Listeners (×N) — subscribe to bot UID only
+              │     ├─▶ translated audio → Agora TX (bot UID)
+              │     │       └─▶ Listeners (×N) — subscribe to bot UID for audio
+              │     └─▶ transcripts (src + dst) → Agora data stream
+              │               └─▶ Listeners — onStreamMessage JSON captions
+              └─▶ (single IRtcConnection handles both audio publish + data stream)
 ```
 
 ## Cost comparison (1 hr, 500 listeners, 1 language pair)
@@ -20,8 +23,6 @@ Speaker (Web/iOS/Android)
 | **This PoC** (Server Gateway + OpenAI) | ~$2.04 | **~$31.91** |
 | Agora ConvoAI | ~$6.00 | ~$35.77 |
 | OpenAI direct (no fanout) | ~$1,020 | ~$1,020+ |
-
-See [`Architecture_Proposal.md`](.claude/Architecture_Proposal.md) for full analysis.
 
 ## Prerequisites
 
@@ -84,6 +85,18 @@ Agora RX  (16 kHz PCM16 mono)
   → Agora TX (sendAudioPcmData, 160 samples/frame @ 16 kHz)
 ```
 
+## Transcript Pipeline
+
+```
+OpenAI session.{input,output}_transcript.{delta,done}
+  → TranscriptCallback (kind=0 source, kind=1 target)
+  → JSON {"lang":"en","text":"...","isFinal":false,"ts":1234567890123}
+  → IRtcConnection::sendStreamMessage (reliable + ordered)
+  → Listeners: ILocalUserObserver::onStreamMessage
+```
+
+Listeners receive both source-language (input) and translated (output) captions as discrete JSON packets on the same data stream as the audio connection. `isFinal=true` marks utterance boundaries.
+
 ## Project Layout
 
 ```
@@ -105,8 +118,9 @@ run.sh                        one-command build+run wrapper
 - Channel profile must be `CHANNEL_PROFILE_LIVE_BROADCASTING` (Server Gateway requirement)
 - `sendAudioPcmData` requires exactly **10 ms frames** (160 samples at 16 kHz)
 - Supported PCM rates: 16 kHz or 48 kHz — **not 44.1 kHz**
-- Single `IRtcConnection` subscribes to speaker audio and publishes translated audio simultaneously under its own UID
+- Single `IRtcConnection` subscribes to speaker audio, publishes translated audio, and sends transcript data stream — all under one bot UID
 - OpenAI audio format: PCM16 24 kHz mono, base64-encoded over WebSocket
+- Agora data stream: reliable + ordered, 30 packets/s max, 1 KB/packet, 6 KB/s
 
 ## Dependencies (installed in Dockerfile)
 

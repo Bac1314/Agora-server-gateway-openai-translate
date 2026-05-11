@@ -20,14 +20,15 @@ class OpenAIWsClient {
 public:
     // Called with decoded 24 kHz PCM16 mono samples from OpenAI
     using PcmCallback = std::function<void(const std::vector<int16_t>&)>;
-    // Called with transcript text deltas (optional, for logging)
-    using TextCallback = std::function<void(const std::string&)>;
+    // Called with transcript text. kind=0: input (source lang), kind=1: output (target lang).
+    // isFinal=true on utterance boundary (.done/.completed event).
+    using TranscriptCallback = std::function<void(int kind, const std::string& text, bool isFinal)>;
 
     OpenAIWsClient(std::string apiKey, std::string srcLang, std::string dstLang);
     ~OpenAIWsClient();
 
-    void setPcmCallback(PcmCallback cb)   { pcmCb_ = std::move(cb); }
-    void setTextCallback(TextCallback cb) { textCb_ = std::move(cb); }
+    void setPcmCallback(PcmCallback cb)             { pcmCb_        = std::move(cb); }
+    void setTranscriptCallback(TranscriptCallback cb) { transcriptCb_ = std::move(cb); }
 
     const std::string& apiKey()  const { return apiKey_; }
     const std::string& srcLang() const { return srcLang_; }
@@ -58,8 +59,8 @@ private:
     std::string srcLang_;
     std::string dstLang_;
 
-    PcmCallback  pcmCb_;
-    TextCallback textCb_;
+    PcmCallback        pcmCb_;
+    TranscriptCallback transcriptCb_;
 
     lws_context* ctx_{nullptr};
     lws*         wsi_{nullptr};

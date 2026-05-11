@@ -23,6 +23,7 @@
 
 #include "audio_pipeline.h"
 #include "openai_ws_client.h"
+#include <json.hpp>
 
 #define SAMPLE_RATE    16000
 #define NUM_CHANNELS   1
@@ -172,6 +173,27 @@ int main(int argc, char* argv[]) {
         if (!pcm16k.empty()) jbuf.push(pcm16k.data(), (int)pcm16k.size());
     });
 
+    // streamId is set after botConn connects; transcript callback captures it by ref.
+    int streamId = -1;
+    openai.setTranscriptCallback(
+        [&, srcLang = opts.srcLang, dstLang = opts.dstLang]
+        (int kind, const std::string& text, bool isFinal) {
+            if (streamId < 0 || text.empty()) return;
+            const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            nlohmann::json j = {
+                {"lang",    kind == 0 ? srcLang : dstLang},
+                {"text",    text},
+                {"isFinal", isFinal},
+                {"ts",      (long long)now}
+            };
+            const std::string payload = j.dump();
+            if (payload.size() > 1000) return;  // 1 KB/packet SDK limit
+            int rc = botConn->sendStreamMessage(streamId, payload.data(), payload.size());
+            if (rc != 0)
+                AG_LOG(INFO, "[DS] sendStreamMessage rc=%d size=%zu", rc, payload.size());
+        });
+
     if (!openai.start()) {
         AG_LOG(ERROR, "Failed to start OpenAI WS client");
         svc->release();
@@ -230,6 +252,13 @@ int main(int argc, char* argv[]) {
     }
     connObs->waitUntilConnected(5000);
     AG_LOG(INFO, "Bot connected as UID %s", opts.botUid.c_str());
+
+    if (botConn->createDataStream(&streamId, /*reliable=*/true,
+                                  /*ordered=*/true, /*sync=*/false) != 0) {
+        AG_LOG(ERROR, "createDataStream failed");
+        return -1;
+    }
+    AG_LOG(INFO, "DataStream ready, streamId=%d", streamId);
 
     // ── Start sender thread ───────────────────────────────────────────────
     std::atomic<bool> senderQuit{false};

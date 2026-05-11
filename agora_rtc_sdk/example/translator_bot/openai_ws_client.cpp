@@ -261,14 +261,25 @@ void OpenAIWsClient::parseMessage(const std::string& msg) {
         } else if (type == "session.output_transcript.delta") {
             auto text = j.value("delta", std::string{});
             if (!text.empty()) {
-                if (textCb_) textCb_(text);
-                AG_LOG(INFO, "[OpenAI] output transcript: %s", text.c_str());
+                AG_LOG(INFO, "[OpenAI] output transcript delta: %s", text.c_str());
+                if (transcriptCb_) transcriptCb_(1, text, false);
             }
+        } else if (type == "session.output_transcript.done" ||
+                   type == "session.output_transcript.completed") {
+            auto text = j.value("transcript", j.value("text", std::string{}));
+            AG_LOG(INFO, "[OpenAI] output transcript final: %s", text.c_str());
+            if (transcriptCb_) transcriptCb_(1, text, true);
         } else if (type == "session.input_transcript.delta") {
             auto text = j.value("delta", std::string{});
             if (!text.empty()) {
-                AG_LOG(INFO, "[OpenAI] input transcript: %s", text.c_str());
+                AG_LOG(INFO, "[OpenAI] input transcript delta: %s", text.c_str());
+                if (transcriptCb_) transcriptCb_(0, text, false);
             }
+        } else if (type == "session.input_transcript.done" ||
+                   type == "session.input_transcript.completed") {
+            auto text = j.value("transcript", j.value("text", std::string{}));
+            AG_LOG(INFO, "[OpenAI] input transcript final: %s", text.c_str());
+            if (transcriptCb_) transcriptCb_(0, text, true);
         } else if (type == "error") {
             AG_LOG(ERROR, "[OpenAI] server error: %s", msg.c_str());
         } else if (type == "session.created" || type == "session.updated") {
