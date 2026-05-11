@@ -40,18 +40,23 @@ struct Options {
     std::string botUid     = "2002";
     std::string srcLang    = "en";
     std::string dstLang    = "es";
+    int32_t     idleExitSec = 300;
 };
 
 // ── PCM observer: receives speaker audio and forwards to OpenAI ──────────────
 
 class TranslatorPcmObserver : public agora::media::IAudioFrameObserverBase {
 public:
-    TranslatorPcmObserver(OpenAIWsClient* client, Resampler* up)
-        : openai_(client), upsampler_(up) {}
+    TranslatorPcmObserver(OpenAIWsClient* client, Resampler* up,
+                          std::atomic<int64_t>* lastFrameMs)
+        : openai_(client), upsampler_(up), lastFrameMs_(lastFrameMs) {}
 
     bool onPlaybackAudioFrameBeforeMixing(const char* /*channelId*/,
                                           agora::media::base::user_id_t uid,
                                           AudioFrame& frame) override {
+        lastFrameMs_->store(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count());
         frameCount_++;
         if (frameCount_ % 500 == 1)
             AG_LOG(INFO, "[Audio] frames=%d uid=%s connected=%d samples=%d",
@@ -77,9 +82,10 @@ public:
     AudioParams getMixedAudioParams()                            override { return {}; }
 
 private:
-    OpenAIWsClient* openai_;
-    int frameCount_{0};
-    Resampler*      upsampler_;
+    OpenAIWsClient*       openai_;
+    int                   frameCount_{0};
+    Resampler*            upsampler_;
+    std::atomic<int64_t>* lastFrameMs_;
 };
 
 // ── Sender thread: drains jitter buffer → Agora PCM sender every 10 ms ───────
@@ -133,6 +139,7 @@ int main(int argc, char* argv[]) {
     parser.add_long_opt("botUid",     &opts.botUid,     "UID the bot joins and publishes as");
     parser.add_long_opt("srcLang",    &opts.srcLang,    "Source language code (e.g. en)");
     parser.add_long_opt("dstLang",    &opts.dstLang,    "Target language code (e.g. es)");
+    parser.add_long_opt("idleExitSeconds", &opts.idleExitSec, "Exit after N seconds of silence (0 = disabled, default 300)");
 
     if (argc <= 1 || !parser.parse_opts(argc, argv)) {
         std::ostringstream ss;
@@ -151,6 +158,8 @@ int main(int argc, char* argv[]) {
         AG_LOG(ERROR, "Must provide --token (appId) and --channelId");
         return -1;
     }
+
+    std::atomic<int64_t> lastFrameMs{0};
 
     std::signal(SIGINT,  onSignal);
     std::signal(SIGTERM, onSignal);
@@ -217,7 +226,7 @@ int main(int argc, char* argv[]) {
     botConn->registerObserver(connObs.get());
 
     auto userObs = std::make_shared<SampleLocalUserObserver>(botConn->getLocalUser());
-    auto pcmObs  = std::make_shared<TranslatorPcmObserver>(&openai, &upsampler);
+    auto pcmObs  = std::make_shared<TranslatorPcmObserver>(&openai, &upsampler, &lastFrameMs);
 
     if (botConn->getLocalUser()->setPlaybackAudioFrameBeforeMixingParameters(
             NUM_CHANNELS, SAMPLE_RATE) != 0) {
@@ -269,9 +278,21 @@ int main(int argc, char* argv[]) {
            opts.speakerUid.c_str(), opts.botUid.c_str(),
            opts.srcLang.c_str(), opts.dstLang.c_str());
     AG_LOG(INFO, "Listeners should subscribe to UID %s", opts.botUid.c_str());
+    if (opts.idleExitSec > 0)
+        AG_LOG(INFO, "Idle-exit enabled: bot will shut down after %ds of silence", opts.idleExitSec);
     AG_LOG(INFO, "Press Ctrl+C to stop.");
 
-    while (!gQuit) { std::this_thread::sleep_for(std::chrono::milliseconds(100)); }
+    while (!gQuit) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        if (opts.idleExitSec > 0 && lastFrameMs.load() > 0) {
+            const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            if (now - lastFrameMs.load() > static_cast<int64_t>(opts.idleExitSec) * 1000) {
+                AG_LOG(INFO, "[idle-exit] No audio for %ds, shutting down", opts.idleExitSec);
+                gQuit = true;
+            }
+        }
+    }
 
     AG_LOG(INFO, "Shutting down...");
 
