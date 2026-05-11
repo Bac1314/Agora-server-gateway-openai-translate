@@ -91,28 +91,111 @@ func (s *Store) runningCount() int {
 	return n
 }
 
-// placeholder — implemented in Task 2
 func (s *Store) Create(req createRequest) (*Session, error) {
-	return nil, errors.New("not implemented")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.runningCount() >= s.maxSessions {
+		return nil, ErrMaxSessions
+	}
+	botUID, err := s.resolveUID(req)
+	if err != nil {
+		return nil, err
+	}
+	sess := &Session{
+		ID:              randomID(),
+		BotUID:          botUID,
+		Channel:         req.Channel,
+		SrcLang:         req.SrcLang,
+		DstLang:         req.DstLang,
+		StartedAt:       time.Now().UTC(),
+		Status:          "running",
+		agoraAppID:      req.AgoraAppID,
+		openAIKey:       req.OpenAIKey,
+		speakerUID:      req.SpeakerUID,
+		idleExitSeconds: req.IdleExitSeconds,
+	}
+	cmd := s.buildCmd(sess, s.botBinary)
+	if cmd.Env == nil {
+		cmd.Env = os.Environ()
+	}
+	cmd.Env = append(cmd.Env, "OPENAI_API_KEY="+sess.openAIKey)
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("start bot: %w", err)
+	}
+	sess.cmd = cmd
+	s.sessions[sess.ID] = sess
+	go s.watchProcess(sess.ID, cmd)
+	return sess, nil
+}
+
+func (s *Store) watchProcess(id string, cmd *exec.Cmd) {
+	err := cmd.Wait()
+	code := 0
+	if err != nil {
+		if ex, ok := err.(*exec.ExitError); ok {
+			code = ex.ExitCode()
+		}
+	}
+	s.mu.Lock()
+	if sess, ok := s.sessions[id]; ok {
+		sess.Status = "exited"
+		sess.ExitCode = &code
+	}
+	s.mu.Unlock()
 }
 
 func (s *Store) Stop(id string) error {
-	return nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.sessions[id]
+	if !ok || sess.Status != "running" {
+		return ErrNotFound
+	}
+	return sess.cmd.Process.Signal(syscall.SIGTERM)
 }
 
 func (s *Store) Get(id string) (*Session, bool) {
-	return nil, false
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.sessions[id]
+	return sess, ok
 }
 
 func (s *Store) List() []*Session {
-	return nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]*Session, 0)
+	for _, sess := range s.sessions {
+		if sess.Status == "running" {
+			out = append(out, sess)
+		}
+	}
+	return out
 }
 
 func (s *Store) resolveUID(req createRequest) (int, error) {
-	return 0, errors.New("not implemented")
+	if req.BotUID != nil {
+		for _, sess := range s.sessions {
+			if sess.Status == "running" && sess.Channel == req.Channel && sess.BotUID == *req.BotUID {
+				return 0, ErrDuplicate
+			}
+		}
+		return *req.BotUID, nil
+	}
+	used := make(map[int]bool)
+	for _, sess := range s.sessions {
+		if sess.Status == "running" {
+			used[sess.BotUID] = true
+		}
+	}
+	for uid := 2000; uid <= 2999; uid++ {
+		if !used[uid] {
+			return uid, nil
+		}
+	}
+	return 0, ErrUIDPoolExhausted
 }
-
-func (s *Store) watchProcess(id string, cmd *exec.Cmd) {}
 
 func randomID() string {
 	b := make([]byte, 8)
@@ -121,7 +204,3 @@ func randomID() string {
 	}
 	return fmt.Sprintf("%x", b)
 }
-
-// keep compiler happy — used in Task 2
-var _ = syscall.SIGTERM
-var _ = os.Environ
