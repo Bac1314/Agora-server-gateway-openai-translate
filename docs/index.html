@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Agora Translator Bot — Live Demo</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="container">
+
+    <div class="hero">
+      <h1>Agora Translator Bot</h1>
+      <p class="tagline">
+        Real-time speech translation via OpenAI Realtime API and Agora Server Gateway.
+        One speaker, one listener — conversation in two languages.
+      </p>
+    </div>
+
+    <!-- Config card -->
+    <div class="card">
+      <h2>Configuration</h2>
+
+      <div class="form-group">
+        <label for="appid">Agora App ID <span style="color:#f44336">*</span></label>
+        <input type="text" id="appid" placeholder="e.g. a1b2c3d4e5f6..." autocomplete="off" />
+      </div>
+
+      <div class="form-group">
+        <label for="channel">Channel Name</label>
+        <input type="text" id="channel" value="translate-test" />
+      </div>
+
+      <div style="display:flex; gap:12px; flex-wrap:wrap;">
+        <div class="form-group" style="flex:1; min-width:120px;">
+          <label for="src">Source Language</label>
+          <input type="text" id="src" value="en" placeholder="en" />
+        </div>
+        <div class="form-group" style="flex:1; min-width:120px;">
+          <label for="dst">Target Language</label>
+          <input type="text" id="dst" value="es" placeholder="es" />
+        </div>
+        <div class="form-group" style="flex:1; min-width:120px;">
+          <label for="bot">Bot UID</label>
+          <input type="text" id="bot" value="2002" placeholder="2002" />
+        </div>
+      </div>
+
+      <div id="config-error" class="status-log error" style="margin-top:8px;"></div>
+
+      <div class="launch-grid" style="margin-top:20px;">
+        <div class="launch-card">
+          <div class="icon">🎙️</div>
+          <h3>Speaker</h3>
+          <p>Joins as host, publishes microphone audio. The bot translates your speech and publishes it back.</p>
+          <button class="btn" id="btn-speaker">Open Speaker</button>
+        </div>
+        <div class="launch-card">
+          <div class="icon">🎧</div>
+          <h3>Listener</h3>
+          <p>Joins as audience, subscribes to the bot's translated audio stream and shows captions.</p>
+          <button class="btn" id="btn-listener">Open Listener</button>
+        </div>
+      </div>
+
+      <p style="margin-top:16px; font-size:0.82rem; color:#666; text-align:center;">
+        You need one Speaker tab and one Listener tab — both can be on the same device.
+      </p>
+    </div>
+
+    <hr class="divider" />
+
+    <!-- Flow explanation -->
+    <div class="card">
+      <h2>How it works</h2>
+      <div class="flow-diagram">
+        <span class="node">Speaker mic</span>
+        <span class="arrow">→</span>
+        <span class="node">Agora RTC</span>
+        <span class="arrow">→</span>
+        <span class="node">Translator Bot (UID 2002)</span>
+        <span class="arrow">→</span>
+        <span class="node">OpenAI Realtime</span>
+        <span class="arrow">→</span>
+        <span class="node">Translated audio</span>
+        <span class="arrow">→</span>
+        <span class="node">Listener</span>
+      </div>
+
+      <div class="info-box" style="margin-top:16px;">
+        <strong>What you'll hear</strong>
+        <ul>
+          <li>Speaker speaks in the <em>source language</em> (e.g. English).</li>
+          <li>The bot receives the audio, sends it to OpenAI Realtime for translation.</li>
+          <li>OpenAI returns translated audio (e.g. Spanish), which the bot republishes under UID 2002.</li>
+          <li>The listener subscribes to UID 2002 and hears the translated speech.</li>
+          <li>Both pages show live captions — source on the left, translation on the right.</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Requirements -->
+    <div class="card">
+      <h2>Prerequisites</h2>
+      <div class="info-box">
+        <ul>
+          <li><strong>Token auth disabled</strong> — your Agora project must have token authentication turned off (App ID only mode).</li>
+          <li><strong>Bot must be running</strong> — start the Docker container before joining. See <a href="../README.md">README</a> for instructions.</li>
+          <li><strong>Same channel</strong> — all three (speaker, listener, bot) must join the same channel name.</li>
+          <li><strong>Bot UID</strong> — the listener automatically subscribes to the bot's UID (default: 2002). Match <code>--botUid</code> if you changed it.</li>
+        </ul>
+      </div>
+    </div>
+
+  </div><!-- .container -->
+
+  <script>
+    (function () {
+      const appidEl  = document.getElementById('appid');
+      const channelEl = document.getElementById('channel');
+      const srcEl    = document.getElementById('src');
+      const dstEl    = document.getElementById('dst');
+      const botEl    = document.getElementById('bot');
+      const errEl    = document.getElementById('config-error');
+
+      // Pre-fill from URL params so bookmarks work
+      const p = new URLSearchParams(window.location.search);
+      if (p.get('appid'))   appidEl.value   = p.get('appid');
+      if (p.get('channel')) channelEl.value = p.get('channel');
+      if (p.get('src'))     srcEl.value     = p.get('src');
+      if (p.get('dst'))     dstEl.value     = p.get('dst');
+      if (p.get('bot'))     botEl.value     = p.get('bot');
+
+      function buildParams(extraUid) {
+        const appId   = appidEl.value.trim();
+        const channel = channelEl.value.trim() || 'translate-test';
+        const src     = srcEl.value.trim()     || 'en';
+        const dst     = dstEl.value.trim()     || 'es';
+        const bot     = botEl.value.trim()     || '2002';
+
+        if (!appId) {
+          errEl.textContent = 'App ID is required.';
+          appidEl.focus();
+          return null;
+        }
+        errEl.textContent = '';
+
+        const q = new URLSearchParams({ appid: appId, channel, src, dst, bot });
+        if (extraUid) q.set('uid', extraUid);
+        return q.toString();
+      }
+
+      document.getElementById('btn-speaker').addEventListener('click', () => {
+        const qs = buildParams('1001');
+        if (qs) window.open('speaker.html?' + qs, '_blank');
+      });
+
+      document.getElementById('btn-listener').addEventListener('click', () => {
+        const qs = buildParams('3000');
+        if (qs) window.open('listener.html?' + qs, '_blank');
+      });
+    })();
+  </script>
+</body>
+</html>

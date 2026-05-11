@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Speaker — Agora Translator Bot</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="container">
+
+    <header>
+      <h1>
+        🎙️ Speaker
+        <span class="status-badge" id="status-badge">Disconnected</span>
+      </h1>
+      <p class="subtitle">Your microphone audio is translated by the bot and broadcast to listeners.</p>
+    </header>
+
+    <!-- Params display -->
+    <div class="card">
+      <h2>Session Info</h2>
+      <div class="params-meta" id="params-display">
+        <!-- filled by JS -->
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="card">
+      <h2>Controls</h2>
+      <div id="controls-idle">
+        <p style="color:#888; font-size:0.88rem; margin-bottom:12px;">
+          Click <strong>Join Channel</strong> to start publishing your mic audio. Make sure the translator bot is running first.
+        </p>
+        <button class="btn" id="btn-join">Join Channel</button>
+        <div class="status-log" id="status-log"></div>
+      </div>
+
+      <div id="controls-joined" style="display:none;">
+        <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+          <span>
+            <span class="audio-indicator" id="audio-indicator"></span>
+            <span id="mic-label">Mic active</span>
+          </span>
+          <button class="btn btn-danger" id="btn-leave">Leave Channel</button>
+          <button class="btn" id="btn-mute" style="background:#444;">Mute</button>
+        </div>
+        <div class="status-log" id="status-log-joined"></div>
+      </div>
+    </div>
+
+    <!-- Captions -->
+    <div class="card">
+      <h2>Live Captions</h2>
+      <div class="captions-grid">
+        <div class="caption-col">
+          <h3 id="src-col-label">Source (en)</h3>
+          <div class="caption-text" id="caption-src"></div>
+        </div>
+        <div class="caption-col">
+          <h3 id="dst-col-label">Translation (es)</h3>
+          <div class="caption-text" id="caption-dst"></div>
+        </div>
+      </div>
+      <p style="margin-top:10px; font-size:0.78rem; color:#555;">
+        Captions are delivered via the bot's data stream. Grey italic = streaming; white = final.
+      </p>
+    </div>
+
+    <p style="text-align:center; font-size:0.8rem; color:#444;">
+      <a href="index.html">← Back to launcher</a>
+    </p>
+
+  </div><!-- .container -->
+
+  <script src="https://download.agora.io/sdk/release/AgoraRTC_N-4.23.2.js"></script>
+  <script src="app.js"></script>
+  <script>
+    (function () {
+      // -----------------------------------------------------------------------
+      // State
+      // -----------------------------------------------------------------------
+      const params = getParams();
+      let client    = null;
+      let micTrack  = null;
+      let muted     = false;
+      let joined    = false;
+      let audioAnimFrame = null;
+
+      // -----------------------------------------------------------------------
+      // DOM refs
+      // -----------------------------------------------------------------------
+      const badgeEl        = document.getElementById('status-badge');
+      const paramsDisplay  = document.getElementById('params-display');
+      const controlsIdle   = document.getElementById('controls-idle');
+      const controlsJoined = document.getElementById('controls-joined');
+      const btnJoin        = document.getElementById('btn-join');
+      const btnLeave       = document.getElementById('btn-leave');
+      const btnMute        = document.getElementById('btn-mute');
+      const statusLog      = document.getElementById('status-log');
+      const statusLogJoined = document.getElementById('status-log-joined');
+      const audioIndicator = document.getElementById('audio-indicator');
+      const srcColLabel    = document.getElementById('src-col-label');
+      const dstColLabel    = document.getElementById('dst-col-label');
+      const captionSrcEl   = document.getElementById('caption-src');
+      const captionDstEl   = document.getElementById('caption-dst');
+
+      // -----------------------------------------------------------------------
+      // Init UI
+      // -----------------------------------------------------------------------
+      const { appId, channel, uid, bot, src, dst } = params;
+
+      paramsDisplay.innerHTML = `
+        <span><strong>Channel:</strong> ${channel}</span>
+        <span><strong>UID:</strong> ${uid || '(auto)'}</span>
+        <span><strong>Bot UID:</strong> ${bot}</span>
+        <span><strong>App ID:</strong> ${truncateAppId(appId)}</span>
+        <span><strong>Src→Dst:</strong> ${src} → ${dst}</span>
+      `;
+
+      srcColLabel.textContent = `Your speech (${langLabel(src)})`;
+      dstColLabel.textContent = `Translation (${langLabel(dst)})`;
+
+      if (!appId) {
+        logStatus(statusLog, 'Error: No App ID provided. Go back to the launcher and enter your App ID.', true);
+        btnJoin.disabled = true;
+      }
+
+      const captionMgr = new CaptionManager(captionSrcEl, captionDstEl);
+
+      // -----------------------------------------------------------------------
+      // Audio level animation
+      // -----------------------------------------------------------------------
+      function startAudioAnimation() {
+        if (!micTrack) return;
+        function tick() {
+          const level = micTrack.getVolumeLevel ? micTrack.getVolumeLevel() : 0;
+          if (level > 0.02) {
+            audioIndicator.classList.add('active');
+          } else {
+            audioIndicator.classList.remove('active');
+          }
+          audioAnimFrame = requestAnimationFrame(tick);
+        }
+        audioAnimFrame = requestAnimationFrame(tick);
+      }
+
+      function stopAudioAnimation() {
+        if (audioAnimFrame) {
+          cancelAnimationFrame(audioAnimFrame);
+          audioAnimFrame = null;
+        }
+        audioIndicator.classList.remove('active');
+      }
+
+      // -----------------------------------------------------------------------
+      // Join
+      // -----------------------------------------------------------------------
+      btnJoin.addEventListener('click', async () => {
+        if (!appId) return;
+        btnJoin.disabled = true;
+        setStatus(badgeEl, 'Connecting…', 'connecting');
+        logStatus(statusLog, 'Creating Agora client…');
+
+        try {
+          client = AgoraRTC.createClient({ mode: 'live', codec: 'vp8' });
+
+          // Subscribe to data stream messages (transcripts from bot)
+          client.on('stream-message', (senderUid, payload) => {
+            handleStreamMessage(senderUid, payload, captionMgr, src, dst);
+          });
+
+          client.on('connection-state-change', (curState) => {
+            if (curState === 'CONNECTED') {
+              setStatus(badgeEl, 'Connected', 'connected');
+            } else if (curState === 'DISCONNECTED' || curState === 'DISCONNECTING') {
+              setStatus(badgeEl, 'Disconnected', '');
+            } else {
+              setStatus(badgeEl, curState, 'connecting');
+            }
+          });
+
+          client.on('exception', (evt) => {
+            logStatus(statusLogJoined, `Warning: ${evt.msg || JSON.stringify(evt)}`);
+          });
+
+          logStatus(statusLog, 'Setting role to host…');
+          await client.setClientRole('host');
+
+          logStatus(statusLog, `Joining channel "${channel}"…`);
+          const assignedUid = await client.join(appId, channel, null, uid);
+          joined = true;
+          logStatus(statusLogJoined, `Joined as UID ${assignedUid}. Bot UID: ${bot}`);
+
+          logStatus(statusLog, 'Requesting microphone…');
+          micTrack = await AgoraRTC.createMicrophoneAudioTrack();
+
+          logStatus(statusLog, 'Publishing mic…');
+          await client.publish([micTrack]);
+
+          // Switch UI
+          controlsIdle.style.display = 'none';
+          controlsJoined.style.display = 'block';
+          setStatus(badgeEl, 'Connected', 'connected');
+
+          startAudioAnimation();
+
+        } catch (err) {
+          const msg = err.message || String(err);
+          logStatus(statusLog, `Error: ${msg}`, true);
+          setStatus(badgeEl, 'Error', 'error');
+          btnJoin.disabled = false;
+          // Cleanup partial state
+          if (client && joined) {
+            try { await client.leave(); } catch (_) {}
+          }
+          client = null;
+          micTrack = null;
+          joined = false;
+        }
+      });
+
+      // -----------------------------------------------------------------------
+      // Mute toggle
+      // -----------------------------------------------------------------------
+      btnMute.addEventListener('click', async () => {
+        if (!micTrack) return;
+        muted = !muted;
+        await micTrack.setMuted(muted);
+        btnMute.textContent = muted ? 'Unmute' : 'Mute';
+        btnMute.style.background = muted ? '#d9534f' : '#444';
+        logStatus(statusLogJoined, muted ? 'Microphone muted.' : 'Microphone unmuted.');
+      });
+
+      // -----------------------------------------------------------------------
+      // Leave
+      // -----------------------------------------------------------------------
+      btnLeave.addEventListener('click', async () => {
+        btnLeave.disabled = true;
+        btnMute.disabled = true;
+        stopAudioAnimation();
+
+        if (micTrack) {
+          micTrack.stop();
+          micTrack.close();
+          micTrack = null;
+        }
+        if (client) {
+          try { await client.leave(); } catch (_) {}
+          client = null;
+        }
+        joined = false;
+        muted = false;
+
+        captionMgr.clear();
+        controlsJoined.style.display = 'none';
+        controlsIdle.style.display = 'block';
+        btnJoin.disabled = !appId;
+        btnLeave.disabled = false;
+        btnMute.disabled = false;
+        btnMute.textContent = 'Mute';
+        btnMute.style.background = '#444';
+
+        setStatus(badgeEl, 'Disconnected', '');
+        logStatus(statusLog, 'Left channel.');
+      });
+
+    })();
+  </script>
+</body>
+</html>
