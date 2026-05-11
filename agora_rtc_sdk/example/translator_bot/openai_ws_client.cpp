@@ -105,7 +105,7 @@ static int callback_openai(struct lws* wsi, enum lws_callback_reasons reason,
 
 static const struct lws_protocols kProtocols[] = {
     {"realtime", callback_openai, 0, 65536, 0, nullptr, 0},
-    LWS_PROTOCOL_LIST_TERM
+    {nullptr, nullptr, 0, 0, 0, nullptr, 0}
 };
 
 // ── OpenAIWsClient ────────────────────────────────────────────────────────────
