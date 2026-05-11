@@ -24,7 +24,7 @@ RUN if [ ! -f /app/agora_rtc_sdk/agora_sdk/libagora_rtc_sdk.so ]; then \
         echo "Downloading Agora SDK ${AGORA_SDK_VERSION} for ${TARGETARCH}..." && \
         curl -fsSL \
             "https://github.com/Bac1314/Agora-server-gateway-openai-translate/releases/download/sdk-${AGORA_SDK_VERSION}/Agora_Native_SDK_${TARGETARCH}.tgz" \
-            | tar xz -C /app/agora_rtc_sdk/agora_sdk/ \
+            | tar xz -C /app/ \
             && echo "Agora SDK download complete"; \
     else \
         echo "Agora SDK already present (local-dev path)"; \
