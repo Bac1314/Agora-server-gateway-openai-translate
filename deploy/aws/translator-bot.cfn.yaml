@@ -1,0 +1,220 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Agora Translator Bot — runs as an ECS Fargate background worker
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Parameters
+# ──────────────────────────────────────────────────────────────────────────────
+Parameters:
+  AgoraAppId:
+    Type: String
+    NoEcho: true
+    Description: Agora App ID (token auth must be disabled for this project)
+
+  OpenAIApiKey:
+    Type: String
+    NoEcho: true
+    Description: OpenAI API key with Realtime API access
+
+  ChannelName:
+    Type: String
+    Default: translate-test
+    Description: Agora channel name to join
+
+  SrcLang:
+    Type: String
+    Default: en
+    Description: Source language code (e.g. en, zh, fr)
+
+  DstLang:
+    Type: String
+    Default: es
+    Description: Target language code (e.g. es, ja, de)
+
+  SpeakerUid:
+    Type: String
+    Default: "0"
+    Description: UID of the speaker to translate (0 = all users)
+
+  BotUid:
+    Type: String
+    Default: "2002"
+    Description: UID the bot joins and publishes translated audio as
+
+  IdleExitSeconds:
+    Type: Number
+    Default: 300
+    MinValue: 0
+    Description: Seconds of audio silence before the bot shuts down (0 = disabled)
+
+  Architecture:
+    Type: String
+    Default: X86_64
+    AllowedValues: [X86_64, ARM64]
+    Description: CPU architecture (X86_64 for widest region support; ARM64 for Graviton cost savings)
+
+  ContainerImage:
+    Type: String
+    Default: ghcr.io/bac1314/agora-server-gateway-openai-translate:latest
+    Description: Container image URI (must be public or accessible from Fargate)
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC to deploy the Fargate task in
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Public or private subnets (must have internet access for Agora + OpenAI outbound)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Resources
+# ──────────────────────────────────────────────────────────────────────────────
+Resources:
+
+  # ── Log group ──────────────────────────────────────────────────────────────
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/translator-bot-${AWS::StackName}
+      RetentionInDays: 7
+
+  # ── IAM: task execution role (allows ECS to pull image + write logs) ────────
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  # ── IAM: task role (runtime permissions — only needs CloudWatch Logs) ───────
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt LogGroup.Arn
+
+  # ── Security group: egress-only (Agora UDP/TCP + OpenAI HTTPS) ─────────────
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Translator bot — outbound only
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS (OpenAI WebSocket + GHCR pull)
+        - IpProtocol: udp
+          FromPort: 1024
+          ToPort: 65535
+          CidrIp: 0.0.0.0/0
+          Description: Agora SD-RTN media UDP
+        - IpProtocol: tcp
+          FromPort: 1024
+          ToPort: 65535
+          CidrIp: 0.0.0.0/0
+          Description: Agora SD-RTN media TCP fallback
+
+  # ── ECS cluster ────────────────────────────────────────────────────────────
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub translator-bot-${AWS::StackName}
+
+  # ── Task definition ────────────────────────────────────────────────────────
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub translator-bot-${AWS::StackName}
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: "512"
+      Memory: "1024"
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      RuntimePlatform:
+        CpuArchitecture: !Ref Architecture
+        OperatingSystemFamily: LINUX
+      ContainerDefinitions:
+        - Name: translator-bot
+          Image: !Ref ContainerImage
+          Essential: true
+          # NOTE (PoC simplicity): secrets are passed as plain environment variables.
+          # NoEcho: true on AgoraAppId and OpenAIApiKey hides them in the CloudFormation
+          # console, which is acceptable for a PoC. For production, replace these two
+          # entries with a Secrets block backed by AWS SSM Parameter Store or Secrets Manager.
+          Environment:
+            - Name: AGORA_APP_ID
+              Value: !Ref AgoraAppId
+            - Name: OPENAI_API_KEY
+              Value: !Ref OpenAIApiKey
+            - Name: CHANNEL
+              Value: !Ref ChannelName
+            - Name: SRC_LANG
+              Value: !Ref SrcLang
+            - Name: DST_LANG
+              Value: !Ref DstLang
+            - Name: SPEAKER_UID
+              Value: !Ref SpeakerUid
+            - Name: BOT_UID
+              Value: !Ref BotUid
+            - Name: IDLE_EXIT_SECONDS
+              Value: !Sub "${IdleExitSeconds}"
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+
+  # ── ECS service (DesiredCount: 1, auto-restarts on idle-exit) ──────────────
+  Service:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: !Sub translator-bot-${AWS::StackName}
+      Cluster: !Ref Cluster
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups: [!Ref SecurityGroup]
+          Subnets: !Ref SubnetIds
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Outputs
+# ──────────────────────────────────────────────────────────────────────────────
+Outputs:
+  LogGroupUrl:
+    Description: CloudWatch Logs for the translator bot
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#logsV2:log-groups/log-group/${LogGroup}"
+
+  ClusterName:
+    Description: ECS cluster name
+    Value: !Ref Cluster
+
+  ServiceName:
+    Description: ECS service name
+    Value: !GetAtt Service.Name
