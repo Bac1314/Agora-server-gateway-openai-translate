@@ -97,7 +97,7 @@ func (s *Store) Create(req createRequest) (*Session, error) {
 }
 
 func (s *Store) Stop(id string) error {
-	return ErrNotFound
+	return nil
 }
 
 func (s *Store) Get(id string) (*Session, bool) {
