@@ -173,26 +173,8 @@ int main(int argc, char* argv[]) {
         if (!pcm16k.empty()) jbuf.push(pcm16k.data(), (int)pcm16k.size());
     });
 
-    // streamId is set after botConn connects; transcript callback captures it by ref.
+    // streamId is set after botConn connects; transcript callback registered after botConn created.
     int streamId = -1;
-    openai.setTranscriptCallback(
-        [&, srcLang = opts.srcLang, dstLang = opts.dstLang]
-        (int kind, const std::string& text, bool isFinal) {
-            if (streamId < 0 || text.empty()) return;
-            const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count();
-            nlohmann::json j = {
-                {"lang",    kind == 0 ? srcLang : dstLang},
-                {"text",    text},
-                {"isFinal", isFinal},
-                {"ts",      (long long)now}
-            };
-            const std::string payload = j.dump();
-            if (payload.size() > 1000) return;  // 1 KB/packet SDK limit
-            int rc = botConn->sendStreamMessage(streamId, payload.data(), payload.size());
-            if (rc != 0)
-                AG_LOG(INFO, "[DS] sendStreamMessage rc=%d size=%zu", rc, payload.size());
-        });
 
     if (!openai.start()) {
         AG_LOG(ERROR, "Failed to start OpenAI WS client");
@@ -211,6 +193,25 @@ int main(int argc, char* argv[]) {
 
     auto botConn = svc->createRtcConnection(botCfg);
     if (!botConn) { AG_LOG(ERROR, "Failed to create bot connection"); return -1; }
+
+    openai.setTranscriptCallback(
+        [&, srcLang = opts.srcLang, dstLang = opts.dstLang]
+        (int kind, const std::string& text, bool isFinal) {
+            if (streamId < 0 || text.empty()) return;
+            const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            nlohmann::json j = {
+                {"lang",    kind == 0 ? srcLang : dstLang},
+                {"text",    text},
+                {"isFinal", isFinal},
+                {"ts",      (long long)now}
+            };
+            const std::string payload = j.dump();
+            if (payload.size() > 1000) return;  // 1 KB/packet SDK limit
+            int rc = botConn->sendStreamMessage(streamId, payload.data(), payload.size());
+            if (rc != 0)
+                AG_LOG(INFO, "[DS] sendStreamMessage rc=%d size=%zu", rc, payload.size());
+        });
 
     auto connObs = std::make_shared<SampleConnectionObserver>();
     botConn->registerObserver(connObs.get());
