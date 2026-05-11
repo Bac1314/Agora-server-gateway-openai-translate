@@ -1,0 +1,51 @@
+# Claude / AI assistant files
+.claude/
+CLAUDE.md
+memory/
+*.claude
+.cursorrules
+.aider*
+.continue/
+
+# Secrets / environment
+.env
+.env.*
+*.env
+secrets.json
+credentials.json
+
+# Build artifacts
+build/
+out/
+*.o
+*.a
+*.d
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# Agora runtime files
+agora_cache.db
+agorareport.dat
+agorareport.dat.*
+agoradns.dat
+certificate.bin
+io.agora.rtc_sdk/
+
+# Agora SDK binaries (large; download from agora.io)
+agora_rtc_sdk/agora_sdk/*.so
+agora_rtc_sdk/agora_sdk/include/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
