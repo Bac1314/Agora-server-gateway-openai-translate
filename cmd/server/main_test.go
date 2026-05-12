@@ -191,3 +191,29 @@ func TestStore_AutoCleanup(t *testing.T) {
 	}
 	t.Fatal("session did not transition to exited within 2s")
 }
+
+func TestHealth(t *testing.T) {
+	srv, _ := newTestServer(t)
+	resp := do(t, srv, "GET", "/health", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	var body map[string]any
+	json.NewDecoder(resp.Body).Decode(&body)
+	if body["status"] != "ok" {
+		t.Fatalf("want status=ok, got %v", body["status"])
+	}
+}
+
+func TestAuthRequired(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req, _ := http.NewRequest("GET", srv.URL+"/health", nil)
+	// deliberately no X-Api-Key header
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != 401 {
+		t.Fatalf("want 401, got %d", resp.StatusCode)
+	}
+}
