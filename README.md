@@ -10,7 +10,7 @@ Real-time audio translation PoC: joins an Agora RTC channel, subscribes to a spe
 | | Platform | What you need |
 |---|---|---|
 | [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Bac1314/Agora-server-gateway-openai-translate) | **Render** (amd64) | Render account, Agora App ID, OpenAI key |
-| [![Launch Stack](https://s3.amazonaws.com/cloudformation-examples/cloudformation-launch-stack.png)](https://console.aws.amazon.com/cloudformation/home#/stacks/create/review?templateURL=https://raw.githubusercontent.com/Bac1314/Agora-server-gateway-openai-translate/main/deploy/aws/translator-bot.cfn.yaml&stackName=translator-bot) | **AWS Fargate** (ECS) | AWS account, Agora App ID, OpenAI key |
+| [![Launch Stack](https://s3.amazonaws.com/cloudformation-examples/cloudformation-launch-stack.png)](https://console.aws.amazon.com/cloudformation/home#/stacks/create/template) | **AWS Fargate** (ECS) — download [`deploy/aws/translator-bot.cfn.yaml`](deploy/aws/translator-bot.cfn.yaml) and upload when prompted | AWS account, Agora App ID, OpenAI key |
 | `docker run -e API_KEY=... -e ...` | **Local Docker** | Docker Desktop, Agora App ID, OpenAI key |
 
 > **Prerequisite for all paths:** Disable token authentication in the [Agora Console](https://console.agora.io) for your project.
