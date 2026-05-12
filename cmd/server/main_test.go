@@ -36,7 +36,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *Store) {
 	srv := httptest.NewServer(authMiddleware("test-key", mux))
 	t.Cleanup(func() {
 		for _, sess := range store.List() {
-			store.Stop(sess.ID) //nolint
+			store.Stop(sess.ID) //nolint:errcheck
 		}
 		srv.Close()
 	})
@@ -77,6 +77,12 @@ func TestStore_Create_Basic(t *testing.T) {
 		cmd.Env = append(os.Environ(), "GO_FAKE_BOT=1")
 		return cmd
 	}
+	t.Cleanup(func() {
+		for _, s := range store.List() {
+			store.Stop(s.ID) //nolint:errcheck
+		}
+		time.Sleep(100 * time.Millisecond)
+	})
 	req := createRequest{
 		AgoraAppID: "app", OpenAIKey: "key", Channel: "ch",
 		SrcLang: "en", DstLang: "es", IdleExitSeconds: 300,
@@ -94,7 +100,6 @@ func TestStore_Create_Basic(t *testing.T) {
 	if sess.BotUID < 2000 || sess.BotUID > 2999 {
 		t.Fatalf("auto-assigned uid %d out of range", sess.BotUID)
 	}
-	store.Stop(sess.ID)
 }
 
 func TestStore_Create_MaxSessions(t *testing.T) {
@@ -104,6 +109,12 @@ func TestStore_Create_MaxSessions(t *testing.T) {
 		cmd.Env = append(os.Environ(), "GO_FAKE_BOT=1")
 		return cmd
 	}
+	t.Cleanup(func() {
+		for _, s := range store.List() {
+			store.Stop(s.ID) //nolint:errcheck
+		}
+		time.Sleep(100 * time.Millisecond)
+	})
 	req := func(ch string) createRequest {
 		return createRequest{AgoraAppID: "a", OpenAIKey: "k", Channel: ch, SrcLang: "en", DstLang: "es", IdleExitSeconds: 300}
 	}
@@ -117,9 +128,6 @@ func TestStore_Create_MaxSessions(t *testing.T) {
 	if err != ErrMaxSessions {
 		t.Fatalf("want ErrMaxSessions, got %v", err)
 	}
-	for _, s := range store.List() {
-		store.Stop(s.ID)
-	}
 }
 
 func TestStore_Create_Duplicate(t *testing.T) {
@@ -129,6 +137,12 @@ func TestStore_Create_Duplicate(t *testing.T) {
 		cmd.Env = append(os.Environ(), "GO_FAKE_BOT=1")
 		return cmd
 	}
+	t.Cleanup(func() {
+		for _, s := range store.List() {
+			store.Stop(s.ID) //nolint:errcheck
+		}
+		time.Sleep(100 * time.Millisecond)
+	})
 	uid := 2500
 	req := createRequest{AgoraAppID: "a", OpenAIKey: "k", Channel: "ch", SrcLang: "en", DstLang: "es", IdleExitSeconds: 300, BotUID: &uid}
 	if _, err := store.Create(req); err != nil {
@@ -137,9 +151,6 @@ func TestStore_Create_Duplicate(t *testing.T) {
 	_, err := store.Create(req)
 	if err != ErrDuplicate {
 		t.Fatalf("want ErrDuplicate, got %v", err)
-	}
-	for _, s := range store.List() {
-		store.Stop(s.ID)
 	}
 }
 
@@ -172,8 +183,8 @@ func TestStore_AutoCleanup(t *testing.T) {
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		got, _ := store.Get(sess.ID)
-		if got != nil && got.Status == "exited" {
+		got, ok := store.Get(sess.ID)
+		if ok && got.Status == "exited" {
 			return
 		}
 		time.Sleep(50 * time.Millisecond)

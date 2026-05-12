@@ -131,16 +131,19 @@ func (s *Store) Create(req createRequest) (*Session, error) {
 
 func (s *Store) watchProcess(id string, cmd *exec.Cmd) {
 	err := cmd.Wait()
-	code := 0
-	if err != nil {
-		if ex, ok := err.(*exec.ExitError); ok {
-			code = ex.ExitCode()
-		}
+	var exitCode *int
+	if err == nil {
+		code := 0
+		exitCode = &code
+	} else if ex, ok := err.(*exec.ExitError); ok {
+		code := ex.ExitCode()
+		exitCode = &code
 	}
+	// exitCode remains nil for abnormal exits (signal kill, I/O error, etc.)
 	s.mu.Lock()
 	if sess, ok := s.sessions[id]; ok {
 		sess.Status = "exited"
-		sess.ExitCode = &code
+		sess.ExitCode = exitCode
 	}
 	s.mu.Unlock()
 }
@@ -155,20 +158,23 @@ func (s *Store) Stop(id string) error {
 	return sess.cmd.Process.Signal(syscall.SIGTERM)
 }
 
-func (s *Store) Get(id string) (*Session, bool) {
+func (s *Store) Get(id string) (Session, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sess, ok := s.sessions[id]
-	return sess, ok
+	if !ok {
+		return Session{}, false
+	}
+	return *sess, true
 }
 
-func (s *Store) List() []*Session {
+func (s *Store) List() []Session {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]*Session, 0)
+	out := make([]Session, 0)
 	for _, sess := range s.sessions {
 		if sess.Status == "running" {
-			out = append(out, sess)
+			out = append(out, *sess)
 		}
 	}
 	return out
