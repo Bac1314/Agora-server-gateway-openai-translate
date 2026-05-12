@@ -289,3 +289,44 @@ func TestCreateSession_AutoUID(t *testing.T) {
 		t.Fatalf("auto-assigned botUid %d out of [2000,2999]", sess.BotUID)
 	}
 }
+
+func TestListSessions(t *testing.T) {
+	srv, _ := newTestServer(t)
+	do(t, srv, "POST", "/sessions", validBody())
+	resp := do(t, srv, "GET", "/sessions", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	var sessions []Session
+	json.NewDecoder(resp.Body).Decode(&sessions)
+	if len(sessions) != 1 {
+		t.Fatalf("want 1 session, got %d", len(sessions))
+	}
+}
+
+func TestGetSession(t *testing.T) {
+	srv, _ := newTestServer(t)
+	var created Session
+	json.NewDecoder(do(t, srv, "POST", "/sessions", validBody()).Body).Decode(&created)
+
+	resp := do(t, srv, "GET", "/sessions/"+created.ID, nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	var sess Session
+	json.NewDecoder(resp.Body).Decode(&sess)
+	if sess.ID != created.ID {
+		t.Fatalf("want id=%s, got %s", created.ID, sess.ID)
+	}
+	if sess.ExitCode != nil {
+		t.Fatalf("exitCode should be nil while running, got %v", sess.ExitCode)
+	}
+}
+
+func TestGetSession_NotFound(t *testing.T) {
+	srv, _ := newTestServer(t)
+	resp := do(t, srv, "GET", "/sessions/doesnotexist", nil)
+	if resp.StatusCode != 404 {
+		t.Fatalf("want 404, got %d", resp.StatusCode)
+	}
+}

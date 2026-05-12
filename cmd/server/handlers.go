@@ -47,13 +47,22 @@ func handleCreateSession(store *Store) http.HandlerFunc {
 
 func handleListSessions(store *Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "not implemented", http.StatusNotImplemented)
+		sessions := store.List()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(sessions)
 	}
 }
 
 func handleGetSession(store *Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "not implemented", http.StatusNotImplemented)
+		id := r.PathValue("id")
+		sess, ok := store.Get(id)
+		if !ok {
+			writeError(w, http.StatusNotFound, "session not found")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(&sess)
 	}
 }
 
