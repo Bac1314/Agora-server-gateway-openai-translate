@@ -127,8 +127,7 @@ OpenAI session.{input,output}_transcript.{delta,done}
 
 ## Known open items
 
-1. **OpenAI model slug** — `gpt-realtime-translate` needs verification. See comment in `openai_ws_client.cpp` around `eventLoop()`. Check https://platform.openai.com/docs/guides/realtime-translation for current model name and exact `session.update` field names.
-2. **`$0.034/min` billing direction** — confirm input-only vs combined via OpenAI dashboard during first test call.
+1. **`$0.034/min` billing direction** — confirm input-only vs combined via OpenAI dashboard during first test call.
 3. **Channels per host** — load test needed; estimate 10–50 per 8-core box.
 
 ## Dependencies (installed in Dockerfile)
