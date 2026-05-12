@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -215,5 +216,76 @@ func TestAuthRequired(t *testing.T) {
 	}
 	if resp.StatusCode != 401 {
 		t.Fatalf("want 401, got %d", resp.StatusCode)
+	}
+}
+
+func TestCreateSession(t *testing.T) {
+	srv, _ := newTestServer(t)
+	resp := do(t, srv, "POST", "/sessions", validBody())
+	if resp.StatusCode != 201 {
+		t.Fatalf("want 201, got %d", resp.StatusCode)
+	}
+	var sess Session
+	json.NewDecoder(resp.Body).Decode(&sess)
+	if sess.ID == "" {
+		t.Fatal("sessionId is empty")
+	}
+	if sess.Channel != "test-channel" {
+		t.Fatalf("want channel=test-channel, got %s", sess.Channel)
+	}
+	if sess.Status != "running" {
+		t.Fatalf("want status=running, got %s", sess.Status)
+	}
+	if sess.SrcLang != "en" {
+		t.Fatalf("want srcLang=en, got %s", sess.SrcLang)
+	}
+}
+
+func TestCreateSession_MissingFields(t *testing.T) {
+	srv, _ := newTestServer(t)
+	resp := do(t, srv, "POST", "/sessions", map[string]any{"channel": "x"})
+	if resp.StatusCode != 400 {
+		t.Fatalf("want 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestCreateSession_MaxSessions(t *testing.T) {
+	srv, _ := newTestServer(t) // max=3 in newTestServer
+	for i := range 3 {
+		body := validBody()
+		body["channel"] = fmt.Sprintf("ch-%d", i)
+		resp := do(t, srv, "POST", "/sessions", body)
+		if resp.StatusCode != 201 {
+			t.Fatalf("session %d: want 201, got %d", i, resp.StatusCode)
+		}
+	}
+	resp := do(t, srv, "POST", "/sessions", map[string]any{
+		"agoraAppId": "id", "openAiKey": "key", "channel": "overflow",
+	})
+	if resp.StatusCode != 503 {
+		t.Fatalf("want 503, got %d", resp.StatusCode)
+	}
+}
+
+func TestCreateSession_Duplicate(t *testing.T) {
+	srv, _ := newTestServer(t)
+	uid := 2500
+	body := validBody()
+	body["botUid"] = uid
+	if do(t, srv, "POST", "/sessions", body).StatusCode != 201 {
+		t.Fatal("first create failed")
+	}
+	resp := do(t, srv, "POST", "/sessions", body)
+	if resp.StatusCode != 409 {
+		t.Fatalf("want 409, got %d", resp.StatusCode)
+	}
+}
+
+func TestCreateSession_AutoUID(t *testing.T) {
+	srv, _ := newTestServer(t)
+	var sess Session
+	json.NewDecoder(do(t, srv, "POST", "/sessions", validBody()).Body).Decode(&sess)
+	if sess.BotUID < 2000 || sess.BotUID > 2999 {
+		t.Fatalf("auto-assigned botUid %d out of [2000,2999]", sess.BotUID)
 	}
 }
