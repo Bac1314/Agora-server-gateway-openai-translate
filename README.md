@@ -2,6 +2,9 @@
 
 Real-time audio translation PoC: joins an Agora RTC channel, subscribes to a speaker's audio, translates it via OpenAI Realtime API, and republishes translated audio under a bot UID. Listeners subscribe to that UID. Transcripts (source + translated) are emitted as JSON on an Agora data stream.
 
+> **⚠️ Proof of concept — not for production use.**
+> This project is a functional demo. Several design shortcuts make it unsuitable for production without significant rework. See [Limitations](#limitations) below.
+
 ## Pick your deploy path
 
 | | Platform | What you need |
@@ -320,6 +323,38 @@ Speaker mic
 ```
 
 Transcripts (`{lang, text, isFinal, ts}`) are sent in parallel on an Agora data stream. Any client in the same channel receives them via `stream-message`.
+
+---
+
+## Limitations
+
+**1. Agora token authentication must be disabled**
+
+The bot joins channels without a token. To run this project, you must turn off token auth in the Agora Console for your App ID. This means any client that knows your App ID can join any channel in that project — a serious security gap in production. A production system would generate short-lived tokens server-side and pass them to both the bot and client apps.
+
+**2. In-memory session store — no persistence**
+
+Sessions are stored in a Go `map` in process memory (`cmd/server/store.go`). All session state is lost on server restart or crash. There is no database, no session recovery, and no way to query sessions that existed before the current process started.
+
+**3. Single-node only — no horizontal scaling**
+
+Session state is local to one process. Running multiple server instances behind a load balancer will not work: a `GET /sessions/:id` or `DELETE /sessions/:id` routed to a different instance will return `404`. Scaling out requires externalizing session state (e.g. Redis, a database) and bot process management.
+
+**4. Static single API key**
+
+All callers share one `API_KEY` env var. There is no per-client key, no key rotation, and no revocation. A leaked key grants full access to create and stop bots.
+
+**5. OpenAI API key passed in every request**
+
+The caller supplies their OpenAI key in the `POST /sessions` request body. The server holds it in memory for the lifetime of the session. It is never logged, but this pattern is awkward for key rotation and makes the server a higher-value target.
+
+**6. No TLS on the REST server**
+
+The server listens on plain HTTP. Run it behind a TLS-terminating reverse proxy (Render and AWS Fargate do this automatically) — do not expose port 8080 directly to the internet.
+
+**7. Bot UID pool capped at 1000 per server**
+
+Auto-assigned bot UIDs come from the range 2000–2999. Maximum 1000 concurrent bots per server instance before `POST /sessions` returns `503`.
 
 ---
 
