@@ -38,9 +38,10 @@ func handleCreateSession(store *Store) http.HandlerFunc {
 			}
 			return
 		}
+		snapshot := *sess
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(sess)
+		_ = json.NewEncoder(w).Encode(&snapshot)
 	}
 }
 
