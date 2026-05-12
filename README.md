@@ -32,39 +32,47 @@ Or start from the [landing page](https://bac1314.github.io/Agora-server-gateway-
 
 ---
 
-## Environment variables / CLI flags
-
-| Env var | CLI flag | Default | Description |
-|---|---|---|---|
-| `AGORA_APP_ID` | `--token` | (required) | Agora App ID |
-| — | — | — | `OPENAI_API_KEY` env var (required, no CLI flag) |
-| `CHANNEL` | `--channelId` | `translate-test` | Channel to join |
-| `SPEAKER_UID` | `--speakerUid` | `0` | UID to translate (0 = all) |
-| `BOT_UID` | `--botUid` | `2002` | Bot's UID; listeners subscribe here |
-| `SRC_LANG` | `--srcLang` | `en` | Source language |
-| `DST_LANG` | `--dstLang` | `es` | Target language |
-| `IDLE_EXIT_SECONDS` | `--idleExitSeconds` | `300` | Seconds of silence before auto-exit (0 = off) |
-
----
-
-## Local development (build from source)
-
-Requires Docker Desktop and Apple Silicon (arm64) or an amd64 Linux box.
+## Quick start — REST API
 
 ```bash
-export OPENAI_API_KEY=sk-...
-export AGORA_APP_ID=<your-app-id>
-export DST_LANG=ja  # target language
-
-# Build and run
-./run.sh
-
-# Or use the prebuilt image (no build step)
-./run.sh --pull
+docker build --platform linux/arm64 -t translator-bot-server .
+docker run --rm -e API_KEY=my-secret-key -p 8080:8080 translator-bot-server
 ```
 
-**Note:** The Agora Linux SDK is not bundled in this repo due to redistribution constraints.
-For local `./run.sh` builds without the `--pull` flag, the SDK is downloaded at Docker build time from the GitHub Release assets.
+Start a translation session:
+
+```bash
+curl -s -X POST http://localhost:8080/sessions \
+  -H "X-Api-Key: my-secret-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agoraAppId":  "<your-agora-app-id>",
+    "openAiKey":   "sk-...",
+    "channel":     "translate-test",
+    "srcLang":     "en",
+    "dstLang":     "es"
+  }'
+```
+
+Returns `{"sessionId":"...","botUid":2000,"channel":"translate-test","status":"running",...}`.
+
+Listeners subscribe to `botUid` (auto-assigned from 2000–2999 if omitted).
+
+Stop a session:
+
+```bash
+curl -s -X DELETE http://localhost:8080/sessions/<sessionId> \
+  -H "X-Api-Key: my-secret-key"
+```
+
+## Server environment variables
+
+| Var | Default | Description |
+|---|---|---|
+| `API_KEY` | (required) | Static key for `X-Api-Key` auth |
+| `PORT` | `8080` | HTTP listen port |
+| `MAX_SESSIONS` | `10` | Hard cap; returns 503 when full |
+| `BOT_BINARY` | `/app/agora_rtc_sdk/example/out/translator_bot` | Path to bot binary |
 
 ---
 

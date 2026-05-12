@@ -1,25 +1,17 @@
 services:
-  - type: worker
+  - type: web
     name: agora-translator-bot
     runtime: image
     image:
       url: ghcr.io/bac1314/agora-server-gateway-openai-translate:latest
     envVars:
-      # Required — set these in the Render dashboard after deploy
-      - key: OPENAI_API_KEY
-        sync: false
-      - key: AGORA_APP_ID
+      # Required — set in Render dashboard after deploy
+      - key: API_KEY
         sync: false
       # Optional — defaults shown
-      - key: CHANNEL
-        value: translate-test
-      - key: SRC_LANG
-        value: en
-      - key: DST_LANG
-        value: es
-      - key: SPEAKER_UID
-        value: "0"
-      - key: BOT_UID
-        value: "2002"
-      - key: IDLE_EXIT_SECONDS
-        value: "300"
+      - key: PORT
+        value: "8080"
+      - key: MAX_SESSIONS
+        value: "10"
+      - key: BOT_BINARY
+        value: /app/agora_rtc_sdk/example/out/translator_bot

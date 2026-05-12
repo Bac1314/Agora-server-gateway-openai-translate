@@ -5,46 +5,10 @@ Description: Agora Translator Bot — runs as an ECS Fargate background worker
 # Parameters
 # ──────────────────────────────────────────────────────────────────────────────
 Parameters:
-  AgoraAppId:
+  ApiKey:
     Type: String
     NoEcho: true
-    Description: Agora App ID (token auth must be disabled for this project)
-
-  OpenAIApiKey:
-    Type: String
-    NoEcho: true
-    Description: OpenAI API key with Realtime API access
-
-  ChannelName:
-    Type: String
-    Default: translate-test
-    Description: Agora channel name to join
-
-  SrcLang:
-    Type: String
-    Default: en
-    Description: Source language code (e.g. en, zh, fr)
-
-  DstLang:
-    Type: String
-    Default: es
-    Description: Target language code (e.g. es, ja, de)
-
-  SpeakerUid:
-    Type: String
-    Default: "0"
-    Description: UID of the speaker to translate (0 = all users)
-
-  BotUid:
-    Type: String
-    Default: "2002"
-    Description: UID the bot joins and publishes translated audio as
-
-  IdleExitSeconds:
-    Type: Number
-    Default: 300
-    MinValue: 0
-    Description: Seconds of audio silence before the bot shuts down (0 = disabled)
+    Description: Static API key for X-Api-Key header authentication
 
   Architecture:
     Type: String
@@ -135,6 +99,11 @@ Resources:
           ToPort: 65535
           CidrIp: 0.0.0.0/0
           Description: Agora SD-RTN media TCP fallback
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
 
   # ── ECS cluster ────────────────────────────────────────────────────────────
   Cluster:
@@ -160,27 +129,16 @@ Resources:
         - Name: translator-bot
           Image: !Ref ContainerImage
           Essential: true
-          # NOTE (PoC simplicity): secrets are passed as plain environment variables.
-          # NoEcho: true on AgoraAppId and OpenAIApiKey hides them in the CloudFormation
-          # console, which is acceptable for a PoC. For production, replace these two
-          # entries with a Secrets block backed by AWS SSM Parameter Store or Secrets Manager.
           Environment:
-            - Name: AGORA_APP_ID
-              Value: !Ref AgoraAppId
-            - Name: OPENAI_API_KEY
-              Value: !Ref OpenAIApiKey
-            - Name: CHANNEL
-              Value: !Ref ChannelName
-            - Name: SRC_LANG
-              Value: !Ref SrcLang
-            - Name: DST_LANG
-              Value: !Ref DstLang
-            - Name: SPEAKER_UID
-              Value: !Ref SpeakerUid
-            - Name: BOT_UID
-              Value: !Ref BotUid
-            - Name: IDLE_EXIT_SECONDS
-              Value: !Sub "${IdleExitSeconds}"
+            - Name: API_KEY
+              Value: !Ref ApiKey
+            - Name: MAX_SESSIONS
+              Value: "10"
+            - Name: PORT
+              Value: "8080"
+          PortMappings:
+            - ContainerPort: 8080
+              Protocol: tcp
           LogConfiguration:
             LogDriver: awslogs
             Options:
