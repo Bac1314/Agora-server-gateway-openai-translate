@@ -68,6 +68,11 @@ func handleGetSession(store *Store) http.HandlerFunc {
 
 func handleDeleteSession(store *Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "not implemented", http.StatusNotImplemented)
+		id := r.PathValue("id")
+		if err := store.Stop(id); err != nil {
+			writeError(w, http.StatusNotFound, "session not found")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	}
 }

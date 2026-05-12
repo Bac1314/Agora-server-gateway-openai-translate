@@ -330,3 +330,50 @@ func TestGetSession_NotFound(t *testing.T) {
 		t.Fatalf("want 404, got %d", resp.StatusCode)
 	}
 }
+
+func TestDeleteSession(t *testing.T) {
+	srv, _ := newTestServer(t)
+	var created Session
+	json.NewDecoder(do(t, srv, "POST", "/sessions", validBody()).Body).Decode(&created)
+
+	resp := do(t, srv, "DELETE", "/sessions/"+created.ID, nil)
+	if resp.StatusCode != 204 {
+		t.Fatalf("want 204, got %d", resp.StatusCode)
+	}
+}
+
+func TestDeleteSession_NotFound(t *testing.T) {
+	srv, _ := newTestServer(t)
+	resp := do(t, srv, "DELETE", "/sessions/doesnotexist", nil)
+	if resp.StatusCode != 404 {
+		t.Fatalf("want 404, got %d", resp.StatusCode)
+	}
+}
+
+func TestDeleteSession_AlreadyExited(t *testing.T) {
+	_, store := newTestServer(t)
+	store.buildCmd = func(sess *Session, binary string) *exec.Cmd {
+		return exec.Command(truePath(t))
+	}
+	req := createRequest{
+		AgoraAppID: "a", OpenAIKey: "k", Channel: "ch",
+		SrcLang: "en", DstLang: "es", IdleExitSeconds: 300,
+	}
+	sess, err := store.Create(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// wait for process to exit and session to be marked exited
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		got, ok := store.Get(sess.ID)
+		if ok && got.Status == "exited" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	// Stop on exited session should return ErrNotFound
+	if err := store.Stop(sess.ID); err != ErrNotFound {
+		t.Fatalf("want ErrNotFound on exited session, got %v", err)
+	}
+}
