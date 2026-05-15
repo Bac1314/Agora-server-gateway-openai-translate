@@ -2,6 +2,8 @@
 
 Real-time audio translation PoC: joins an Agora RTC channel, subscribes to a speaker's audio, translates it via OpenAI Realtime API, and republishes translated audio under a bot UID. Listeners subscribe to that UID. Transcripts (source + translated) are emitted as JSON on an Agora data stream.
 
+<img src="diagram.png" alt="Architecture diagram" style="border-radius: 12px;" />
+
 > **⚠️ Proof of concept — not for production use.**
 > This project is a functional demo. Several design shortcuts make it unsuitable for production without significant rework. See [Limitations](#limitations) below.
 

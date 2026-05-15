@@ -6,6 +6,7 @@ memory/
 .cursorrules
 .aider*
 .continue/
+docs/
 
 # Secrets / environment
 .env
