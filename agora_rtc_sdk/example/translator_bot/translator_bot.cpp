@@ -35,6 +35,7 @@
 
 struct Options {
     std::string appId;
+    std::string token;        // RTC token — empty for App-ID-only projects
     std::string channelId;
     std::string speakerUid = "0";
     std::string botUid     = "2002";
@@ -133,7 +134,8 @@ static void onSignal(int) { gQuit = true; }
 int main(int argc, char* argv[]) {
     Options opts;
     opt_parser parser;
-    parser.add_long_opt("token",      &opts.appId,      "Agora App ID (required)");
+    parser.add_long_opt("appId",      &opts.appId,      "Agora App ID (required)");
+    parser.add_long_opt("rtcToken",   &opts.token,      "Agora RTC token (optional; omit for App-ID-only projects)");
     parser.add_long_opt("channelId",  &opts.channelId,  "Channel name (required)");
     parser.add_long_opt("speakerUid", &opts.speakerUid, "UID of the speaker to translate");
     parser.add_long_opt("botUid",     &opts.botUid,     "UID the bot joins and publishes as");
@@ -155,7 +157,7 @@ int main(int argc, char* argv[]) {
         return -1;
     }
     if (opts.appId.empty() || opts.channelId.empty()) {
-        AG_LOG(ERROR, "Must provide --token (appId) and --channelId");
+        AG_LOG(ERROR, "Must provide --appId and --channelId");
         return -1;
     }
 
@@ -167,7 +169,7 @@ int main(int argc, char* argv[]) {
 
     // ── Agora service (single global singleton) ───────────────────────────
     // audio device off, audio processor on, video off
-    auto* svc = createAndInitAgoraService(false, true, false);
+    auto* svc = createAndInitAgoraService(false, true, false, false, false, opts.appId.c_str());
     if (!svc) { AG_LOG(ERROR, "Failed to init AgoraService"); return -1; }
 
     // ── Audio pipeline objects ────────────────────────────────────────────
@@ -255,8 +257,9 @@ int main(int argc, char* argv[]) {
         botConn->getLocalUser()->subscribeAudio(opts.speakerUid.c_str());
     }
 
-    if (botConn->connect(opts.appId.c_str(), opts.channelId.c_str(),
-                         opts.botUid.c_str())) {
+    // token is optional: nullptr joins in App-ID-only (no-certificate) mode
+    const char* tokenArg = opts.token.empty() ? nullptr : opts.token.c_str();
+    if (botConn->connect(tokenArg, opts.channelId.c_str(), opts.botUid.c_str())) {
         AG_LOG(ERROR, "Failed to connect bot to channel");
         return -1;
     }

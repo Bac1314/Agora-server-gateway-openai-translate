@@ -15,8 +15,7 @@ Real-time audio translation PoC: joins an Agora RTC channel, subscribes to a spe
 | [![Launch Stack](https://s3.amazonaws.com/cloudformation-examples/cloudformation-launch-stack.png)](https://console.aws.amazon.com/cloudformation/home#/stacks/create/template) | **AWS Fargate** (ECS) — download [`deploy/aws/translator-bot.cfn.yaml`](deploy/aws/translator-bot.cfn.yaml) and upload when prompted | AWS account, Agora App ID, OpenAI key |
 | `docker run -e API_KEY=... -e ...` | **Local Docker** | Docker Desktop, Agora App ID, OpenAI key |
 
-> **Prerequisite for all paths:** Disable token authentication in the [Agora Console](https://console.agora.io) for your project.
-> Settings → Project Management → (your project) → Security → Primary certificate → toggle **OFF**.
+> **Token auth:** The bot supports both **App-ID-only** projects (no certificate) and **certificate-enabled** projects. For certificate-enabled projects, generate an RTC token and pass it as `"token"` in the POST /sessions body.
 
 ---
 
@@ -41,6 +40,7 @@ docker run --rm -e API_KEY=my-secret-key -p 8080:8080 translator-bot-server
 ### 2. Start a translation session
 
 ```bash
+# App-ID-only project (no App Certificate):
 curl -s -X POST http://localhost:8080/sessions \
   -H "X-Api-Key: my-secret-key" \
   -H "Content-Type: application/json" \
@@ -48,6 +48,19 @@ curl -s -X POST http://localhost:8080/sessions \
     "agoraAppId": "<your-agora-app-id>",
     "openAiKey":  "sk-...",
     "channel":    "translate-test",
+    "srcLang":    "en",
+    "dstLang":    "es"
+  }'
+
+# Certificate-enabled project (add "token"):
+curl -s -X POST http://localhost:8080/sessions \
+  -H "X-Api-Key: my-secret-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agoraAppId": "<your-agora-app-id>",
+    "openAiKey":  "sk-...",
+    "channel":    "translate-test",
+    "token":      "<rtc-token-for-bot-uid>",
     "srcLang":    "en",
     "dstLang":    "es"
   }'
@@ -79,7 +92,7 @@ import AgoraRTC from "agora-rtc-sdk-ng";
 
 const client = AgoraRTC.createClient({ mode: "live", codec: "vp8" });
 await client.setClientRole("audience");
-await client.join("<agoraAppId>", "translate-test", null, localUid);
+await client.join("<agoraAppId>", "translate-test", null /* or RTC token for cert-enabled projects */, localUid);
 
 client.on("user-published", async (user, mediaType) => {
   if (user.uid === botUid && mediaType === "audio") {
@@ -165,6 +178,7 @@ Start a new translator bot process.
 | `agoraAppId` | string | yes | — | Agora project App ID |
 | `openAiKey` | string | yes | — | OpenAI API key with Realtime access |
 | `channel` | string | yes | — | Agora channel name to join |
+| `token` | string | no | — | Agora RTC token for the bot UID. Required if your project has an App Certificate enabled; omit for App-ID-only projects |
 | `srcLang` | string | no | `"en"` | ISO language code of the speaker |
 | `dstLang` | string | no | `"es"` | ISO language code for translation output |
 | `speakerUid` | int | no | `0` | Agora UID to subscribe to (`0` = first host seen) |
@@ -330,9 +344,9 @@ Transcripts (`{lang, text, isFinal, ts}`) are sent in parallel on an Agora data 
 
 ## Limitations
 
-**1. Agora token authentication must be disabled**
+**1. RTC token is caller-supplied, not server-generated**
 
-The bot joins channels without a token. To run this project, you must turn off token auth in the Agora Console for your App ID. This means any client that knows your App ID can join any channel in that project — a serious security gap in production. A production system would generate short-lived tokens server-side and pass them to both the bot and client apps.
+For certificate-enabled projects, the caller must generate and pass a valid RTC token for the bot's UID. The server does not generate tokens itself — there is no token-builder integration. In production, tokens should be short-lived and generated server-side; this PoC trusts whatever token the caller provides.
 
 **2. In-memory session store — no persistence**
 

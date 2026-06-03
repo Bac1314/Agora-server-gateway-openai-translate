@@ -30,6 +30,7 @@ type Session struct {
 	// unexported — excluded from JSON serialization
 	agoraAppID      string
 	openAIKey       string
+	token           string
 	speakerUID      int
 	idleExitSeconds int
 	cmd             *exec.Cmd
@@ -39,6 +40,7 @@ type createRequest struct {
 	AgoraAppID      string `json:"agoraAppId"`
 	OpenAIKey       string `json:"openAiKey"`
 	Channel         string `json:"channel"`
+	Token           string `json:"token"`           // optional; omit for App-ID-only projects
 	SrcLang         string `json:"srcLang"`
 	DstLang         string `json:"dstLang"`
 	SpeakerUID      int    `json:"speakerUid"`
@@ -64,15 +66,19 @@ func newStore(maxSessions int, botBinary string) *Store {
 }
 
 func defaultBuildCmd(sess *Session, binary string) *exec.Cmd {
-	return exec.Command(binary,
-		"--token", sess.agoraAppID,
+	args := []string{
+		"--appId", sess.agoraAppID,
 		"--channelId", sess.Channel,
 		"--speakerUid", fmt.Sprintf("%d", sess.speakerUID),
 		"--botUid", fmt.Sprintf("%d", sess.BotUID),
 		"--srcLang", sess.SrcLang,
 		"--dstLang", sess.DstLang,
 		"--idleExitSeconds", fmt.Sprintf("%d", sess.idleExitSeconds),
-	)
+	}
+	if sess.token != "" {
+		args = append(args, "--rtcToken", sess.token)
+	}
+	return exec.Command(binary, args...)
 }
 
 func (s *Store) ActiveCount() int {
@@ -112,6 +118,7 @@ func (s *Store) Create(req createRequest) (*Session, error) {
 		Status:          "running",
 		agoraAppID:      req.AgoraAppID,
 		openAIKey:       req.OpenAIKey,
+		token:           req.Token,
 		speakerUID:      req.SpeakerUID,
 		idleExitSeconds: req.IdleExitSeconds,
 	}
